@@ -26,23 +26,37 @@ wss.on('connection', (ws, req) => {
   }
 
   ws.on('message', (raw) => {
+    let socket;
     try {
       const msg = JSON.parse(raw.toString());
       const { host, port = 80, payload } = msg;
       const data = Buffer.from(payload, 'base64');
 
-      const socket = net.createConnection({ host, port }, () => {
+      socket = net.createConnection({ host, port }, () => {
         socket.write(data);
       });
 
-      socket.on('data', (chunk) => ws.send(chunk));
-      socket.on('error', () => {
-        ws.send(JSON.stringify({ error: 'upstream error' }));
-        ws.close();
+      // Всё, что приходит от целевого сервера — сразу в WS
+      socket.on('data', (chunk) => {
+        if (ws.readyState === ws.OPEN) {
+          ws.send(chunk);
+        }
       });
-      ws.on('close', () => socket.destroy());
-    } catch {
-      ws.send(JSON.stringify({ error: 'bad message' }));
+
+      socket.on('end', () => {
+        if (ws.readyState === ws.OPEN) ws.close();
+      });
+
+      socket.on('error', () => {
+        if (ws.readyState === ws.OPEN) ws.close();
+      });
+
+      ws.on('close', () => {
+        if (socket) socket.destroy();
+      });
+    } catch (e) {
+      if (ws.readyState === ws.OPEN) ws.close();
+      if (socket) socket.destroy();
     }
   });
 });
